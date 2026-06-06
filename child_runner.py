@@ -357,6 +357,15 @@ def is_running(bot_id: str) -> bool:
     return bot_id in _running_bots
 
 
+async def get_bot_info(bot_id: str):
+    """Return bot info from the already-running child app — no extra getMe call."""
+    entry = _running_bots.get(bot_id)
+    if not entry:
+        raise RuntimeError(f"Bot {bot_id} is not running")
+    # app.bot is the Bot instance; .bot property holds the cached User (bot info)
+    return await entry["app"].bot.get_me()
+
+
 async def start_all_bots():
     """Called on father bot startup — restore all previously registered bots."""
     bots = db.get_all_active_bots()
