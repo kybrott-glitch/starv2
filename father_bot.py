@@ -86,11 +86,36 @@ async def add_bot_receive_token(update: Update, context: ContextTypes.DEFAULT_TY
     # Validate token by fetching bot info
     try:
         from telegram import Bot
+        from telegram.error import RetryAfter, Forbidden
         temp_bot = Bot(token=token)
         bot_info = await temp_bot.get_me()
         await temp_bot.close()
+    except RetryAfter as e:
+        retry_in = int(e.retry_after)
+        mins = retry_in // 60
+        secs = retry_in % 60
+        time_str = f"{mins}m {secs}s" if mins else f"{secs}s"
+        await update.message.reply_text(
+            f"⏳ Telegram rate limit hit.\n\n"
+            f"Too many bot logins in a short time. Please wait {time_str} and try again.\n\n"
+            f"Your token is likely valid — this is a Telegram restriction, not an error."
+        )
+        return AWAITING_TOKEN
+    except Forbidden:
+        await update.message.reply_text(
+            "❌ Token is valid but the bot is blocked or deleted. Check it in @BotFather."
+        )
+        return AWAITING_TOKEN
     except Exception as e:
-        await update.message.reply_text(f"❌ Invalid token or bot unreachable: {e}")
+        err = str(e).lower()
+        if "unauthorized" in err or "invalid token" in err or "not found" in err:
+            await update.message.reply_text(
+                "❌ Invalid token. Please copy it again from @BotFather and try again."
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ Could not reach Telegram: {e}\nPlease try again."
+            )
         return AWAITING_TOKEN
 
     username = bot_info.username or ""
