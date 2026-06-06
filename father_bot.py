@@ -83,56 +83,27 @@ async def add_bot_receive_token(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("❌ This token is already registered on the platform.")
         return ConversationHandler.END
 
-    # Validate token by fetching bot info
-    try:
-        from telegram import Bot
-        from telegram.error import RetryAfter, Forbidden
-        temp_bot = Bot(token=token)
-        bot_info = await temp_bot.get_me()
-        await temp_bot.close()
-    except RetryAfter as e:
-        retry_in = int(e.retry_after)
-        mins = retry_in // 60
-        secs = retry_in % 60
-        time_str = f"{mins}m {secs}s" if mins else f"{secs}s"
-        await update.message.reply_text(
-            f"⏳ Telegram rate limit hit.\n\n"
-            f"Too many bot logins in a short time. Please wait {time_str} and try again.\n\n"
-            f"Your token is likely valid — this is a Telegram restriction, not an error."
-        )
-        return AWAITING_TOKEN
-    except Forbidden:
-        await update.message.reply_text(
-            "❌ Token is valid but the bot is blocked or deleted. Check it in @BotFather."
-        )
-        return AWAITING_TOKEN
-    except Exception as e:
-        err = str(e).lower()
-        if "unauthorized" in err or "invalid token" in err or "not found" in err:
-            await update.message.reply_text(
-                "❌ Invalid token. Please copy it again from @BotFather and try again."
-            )
-        else:
-            await update.message.reply_text(
-                f"❌ Could not reach Telegram: {e}\nPlease try again."
-            )
-        return AWAITING_TOKEN
-
-    username = bot_info.username or ""
-    display_name = bot_info.first_name or username
-
-    # Register in DB
+    # Register in DB first, then start — avoids getMe rate limits
     bot_id = db.register_bot(
         owner_id=user.id,
         token=token,
-        username=username,
-        display_name=display_name
+        username="",
+        display_name="Starting..."
     )
 
-    # Start the child bot
-    msg = await update.message.reply_text(f"⏳ Starting @{username}...")
+    msg = await update.message.reply_text("⏳ Connecting your bot...")
     try:
         await start_child_bot(token=token, bot_id=bot_id, owner_id=user.id)
+
+        # Fetch bot info from the already-running app (no extra getMe call)
+        from child_runner import get_bot_info
+        bot_info = await get_bot_info(bot_id)
+        username = bot_info.username or ""
+        display_name = bot_info.first_name or username
+
+        # Update DB with real username/name
+        db.update_bot_info(bot_id=bot_id, username=username, display_name=display_name)
+
         await msg.edit_text(
             f"✅ *Bot connected and running!*\n\n"
             f"🤖 @{username} ({display_name})\n"
@@ -144,7 +115,11 @@ async def add_bot_receive_token(update: Update, context: ContextTypes.DEFAULT_TY
         )
     except Exception as e:
         db.deactivate_bot(bot_id=bot_id, owner_id=user.id)
-        await msg.edit_text(f"❌ Failed to start bot: {e}\nPlease check the token and try again.")
+        err = str(e).lower()
+        if "unauthorized" in err or "invalid token" in err:
+            await msg.edit_text("❌ Invalid token. Please copy it again from @BotFather and try /addbot again.")
+        else:
+            await msg.edit_text(f"❌ Failed to start bot: {e}\nPlease try again.")
 
     return ConversationHandler.END
 
