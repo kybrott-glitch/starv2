@@ -74,6 +74,13 @@ class Database:
         self.conn.commit()
         return bot_id
 
+    def update_bot_info(self, bot_id: str, username: str, display_name: str):
+        self.conn.execute(
+            "UPDATE child_bots SET username = ?, display_name = ? WHERE id = ?",
+            (username, display_name, bot_id)
+        )
+        self.conn.commit()
+
     def get_bot_by_token(self, token: str):
         row = self.conn.execute(
             "SELECT * FROM child_bots WHERE token = ? AND active = 1", (token,)
